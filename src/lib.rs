@@ -164,9 +164,9 @@ pub const MODE: Mode = Mode {
 pub struct LoRaBuilder {}
 
 impl LoRaBuilder
-where SPI: Transfer<u8, Error = E> + Write<u8, Error = E>, CS: OutputPin, RESET: OutputPin,
 {
-    fn new<SPI, CS, RESET>(spi: SPI, cs: CS, reset: RESET, frequency: i64, delay: Delay) -> Result<LoRa<SPI, CS, RESET, LoRaMode>, ()>
+    fn new<SPI, CS, RESET>(spi: SPI, cs: CS, reset: RESET, frequency: i64, delay: Delay) -> Result<LoRaMode<SPI, CS, RESET>, ()>
+    where SPI: Transfer<u8, Error = E> + Write<u8, Error = E>, CS: OutputPin, RESET: OutputPin,
     {
         Ok(LoRa::new(spi, cs, reset, frequency, delay))
     }
