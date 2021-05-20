@@ -150,11 +150,10 @@ use embedded_hal::blocking::delay::DelayMs;
 use embedded_hal::blocking::spi::{Transfer, Write};
 use embedded_hal::digital::v2::OutputPin;
 use embedded_hal::spi::{Mode, Phase, Polarity};
+use heapless;
 
-mod register;
-use self::register::PaConfig;
-use self::register::Register;
-use self::register::IRQ;
+pub mod register;
+use self::register::*;
 
 /// Provides the necessary SPI mode configuration for the radio
 pub const MODE: Mode = Mode {
@@ -162,8 +161,19 @@ pub const MODE: Mode = Mode {
     polarity: Polarity::IdleHigh,
 };
 
+pub struct LoRaBuilder {}
+
+impl LoRaBuilder
+where SPI: Transfer<u8, Error = E> + Write<u8, Error = E>, CS: OutputPin, RESET: OutputPin,
+{
+    fn new<SPI, CS, RESET>(spi: SPI, cs: CS, reset: RESET, frequency: i64, delay: Delay) -> Result<LoRa<SPI, CS, RESET, LoRaMode>, ()>
+    {
+        Ok(LoRa::new(spi, cs, reset, frequency, delay))
+    }
+}
+
 /// Provides high-level access to Semtech SX1276/77/78/79 based boards connected to a Raspberry Pi
-pub struct LoRa<SPI, CS, RESET> {
+struct LoRa<SPI, CS, RESET> {
     spi: SPI,
     cs: CS,
     reset: RESET,
@@ -171,6 +181,28 @@ pub struct LoRa<SPI, CS, RESET> {
     pub explicit_header: bool,
     pub mode: RadioMode,
 }
+
+impl <SPI, CS, RESET>LoRa<SPI, CS, RESET, LoRaMode>
+where
+    SPI: Transfer<u8, Error = E> + Write<u8, Error = E>,
+    CS: OutputPin,
+    RESET: OutputPin,
+{
+
+
+}
+
+pub enum LoRaMode
+{
+    LongRangeMode,
+    Sleep,
+    Stdby,
+    Tx,
+    RxContinuous,
+    RxSingle,
+}
+
+
 
 #[derive(Debug)]
 pub enum Error<SPI, CS, RESET> {
@@ -181,6 +213,9 @@ pub enum Error<SPI, CS, RESET> {
     SPI(SPI),
     Transmitting,
 }
+
+
+
 
 use Error::*;
 use crate::register::{FskDataModulationShaping, FskRampUpRamDown};
@@ -222,6 +257,8 @@ where
         if version == VERSION_CHECK {
             sx127x.set_mode(RadioMode::Sleep)?;
             sx127x.set_frequency(frequency)?;
+            // Half of the FIFO is for Rx the other half for Tx. Setting both to 0 I believe allows you
+            // to use the full FIFO in either Rx or Tx mode.
             sx127x.write_register(Register::RegFifoTxBaseAddr.addr(), 0)?;
             sx127x.write_register(Register::RegFifoRxBaseAddr.addr(), 0)?;
             let lna = sx127x.read_register(Register::RegLna.addr())?;
@@ -269,31 +306,52 @@ where
         self.write_register(Register::RegDioMapping1.addr(), 0b01_00_00_00)
     }
 
-    pub fn transmit_payload(
-        &mut self,
-        buffer: [u8; 255],
-        payload_size: usize,
-    ) -> Result<(), Error<E, CS::Error, RESET::Error>> {
-        if self.transmitting()? {
-            Err(Transmitting)
-        } else {
-            self.set_mode(RadioMode::Stdby)?;
-            if self.explicit_header {
-                self.set_explicit_header_mode()?;
-            } else {
-                self.set_implicit_header_mode()?;
-            }
+    /*pub fn transmit_packet(&mut self, packet: Packet) -> Result<(), Error<E, CS::Error, RESET::Error>>
+    {
+        Ok(())
+    }*/
 
-            self.write_register(Register::RegIrqFlags.addr(), 0)?;
-            self.write_register(Register::RegFifoAddrPtr.addr(), 0)?;
-            self.write_register(Register::RegPayloadLength.addr(), 0)?;
-            for byte in buffer.iter().take(payload_size) {
-                self.write_register(Register::RegFifo.addr(), *byte)?;
-            }
-            self.write_register(Register::RegPayloadLength.addr(), payload_size as u8)?;
-            self.set_mode(RadioMode::Tx)?;
-            Ok(())
+    //pub fn transmit_payload(&mut self, buffer: [u8; 255], payload_size: usize) -> Result<(), Error<E, CS::Error, RESET::Error>>
+    pub fn transmit_payload(&mut self, payload: heapless::Vec<u8, 255>) -> Result<(), Error<E, CS::Error, RESET::Error>>
+    {
+        // Variable length packet (page 73):
+        // Variable length packet format is selected when bit PacketFormat is set to 1.
+        // In this mode the length of the payload, indicated by the length byte, is given by the first byte of the FIFO and is limited to 255 bytes.
+        // In this mode, the payload must contain at least 2 bytes, i.e. length + address or message byte
+
+        if self.transmitting()?
+        {
+            return Err(Transmitting);
         }
+
+        self.set_mode(RadioMode::Stdby)?;
+
+        if self.explicit_header
+        {
+            self.set_explicit_header_mode()?;
+        }
+
+        else
+        {
+            self.set_implicit_header_mode()?;
+        }
+
+        self.write_register(Register::RegIrqFlags.addr(), 0)?;
+        self.write_register(Register::RegFifoAddrPtr.addr(), 0)?;
+        self.write_register(Register::RegPayloadLength.addr(), 0)?;
+
+        let length_byte = payload.len() as u8;
+
+        self.write_register(Register::RegFifo.addr(), length_byte)?;
+
+        for byte in payload.iter()
+        {
+            self.write_register(Register::RegFifo.addr(), *byte)?;
+        }
+
+        //self.write_register(Register::RegPayloadLength.addr(), payload_size as u8)?;
+
+        self.set_mode(RadioMode::Tx)
     }
 
     /// Blocks the current thread, returning the size of a packet if one is received or an error is the
@@ -349,6 +407,21 @@ where
         Ok(buffer)
     }
 
+    /*pub fn is_fifo_full(&mut self) -> Result<u8, Error<E, CS::Error, RESET::Error>>
+    {
+
+    }
+
+    pub fn is_fifo_threshold(&mut self) -> Result<u8, Error<E, CS::Error, RESET::Error>>
+    {
+        self.read_register(Register::RegIrqFlags.addr())? & IRQ::IrqTxDoneMask.addr() == 1
+    }*/
+
+    pub fn irq_flags(&mut self) -> Result<u8, Error<E, CS::Error, RESET::Error>>
+    {
+        self.read_register(Register::RegIrqFlags.addr())
+    }
+
     /// Returns true if the radio is currently transmitting a packet.
     pub fn transmitting(&mut self) -> Result<bool, Error<E, CS::Error, RESET::Error>> {
         if (self.read_register(Register::RegOpMode.addr())? & RadioMode::Tx.addr())
@@ -356,9 +429,9 @@ where
         {
             Ok(true)
         } else {
-            if (self.read_register(Register::RegIrqFlags.addr())? & IRQ::IrqTxDoneMask.addr()) == 1
+            if (self.read_register(Register::RegIrqFlags.addr())? & IRQ::TxDoneMask.addr()) == 1
             {
-                self.write_register(Register::RegIrqFlags.addr(), IRQ::IrqTxDoneMask.addr())?;
+                self.write_register(Register::RegIrqFlags.addr(), IRQ::TxDoneMask.addr())?;
             }
             Ok(false)
         }
@@ -371,7 +444,7 @@ where
     }
 
     /// Sets the transmit power and pin. Levels can range from 0-14 when the output
-    /// pin = 0(RFO), and form 0-20 when output pin = 1(PaBoost). Power is in dB.
+    /// pin = 0(RFO), and from 0-20 when output pin = 1(PaBoost). Power is in dB.
     /// Default value is `17`.
     pub fn set_tx_power(
         &mut self,
@@ -646,7 +719,7 @@ where
         self.write_register(Register::RegModemConfig3.addr(), config_3)
     }
 
-    fn read_register(&mut self, reg: u8) -> Result<u8, Error<E, CS::Error, RESET::Error>> {
+    pub fn read_register(&mut self, reg: u8) -> Result<u8, Error<E, CS::Error, RESET::Error>> {
         self.cs.set_low().map_err(CS)?;
 
         let mut buffer = [reg & 0x7f, 0];
@@ -668,7 +741,7 @@ where
         Ok(())
     }
 
-    pub fn put_in_fsk_mode(&mut self) -> Result<(), Error<E, CS::Error, RESET::Error>> {
+    /*pub fn put_in_fsk_mode(&mut self) -> Result<(), Error<E, CS::Error, RESET::Error>> {
         // Put in FSK mode
         let op_mode: &mut u8 = 0x0
             .set_bit(7, false)  // FSK mode
@@ -677,9 +750,9 @@ where
             .set_bits(0..2, 0b011); // Mode
 
         self.write_register(Register::RegOpMode as u8, *op_mode)
-    }
+    }*/
 
-    pub fn set_fsk_pa_ramp(
+    /*pub fn set_fsk_pa_ramp(
         &mut self,
         modulation_shaping: FskDataModulationShaping,
         ramp: FskRampUpRamDown
@@ -689,7 +762,7 @@ where
             .set_bits(0..3, ramp as u8);
 
         self.write_register(Register::RegPaRamp as u8, *pa_ramp)
-    }
+    }*/
 }
 /// Modes of the radio and their corresponding register values.
 #[derive(Clone, Copy)]

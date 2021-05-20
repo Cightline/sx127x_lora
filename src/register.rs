@@ -46,10 +46,11 @@ pub enum PaConfig {
 
 #[derive(Clone, Copy)]
 pub enum IRQ {
-    IrqTxDoneMask = 0x08,
-    IrqPayloadCrcErrorMask = 0x20,
-    IrqRxDoneMask = 0x40,
+    TxDoneMask          = 0x08,
+    RxDoneMask          = 0x40,
+    PayloadCrcErrorMask = 0x20,
 }
+
 
 impl Register {
     pub fn addr(self) -> u8 {
