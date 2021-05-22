@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+use crate::RadioMode;
+
 #[derive(Clone, Copy)]
 pub enum Register {
     RegFifo = 0x00,
@@ -38,24 +40,17 @@ pub enum Register {
     RegVersion = 0x42,
     RegPaDac = 0x4d,
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialOrd, PartialEq)]
 pub enum PaConfig {
     PaBoost = 0x80,
     PaOutputRfoPin = 0,
 }
 
 #[derive(Clone, Copy)]
-pub enum IRQ {
-    TxDoneMask          = 0x08,
-    RxDoneMask          = 0x40,
-    PayloadCrcErrorMask = 0x20,
-}
-
-
-impl Register {
-    pub fn addr(self) -> u8 {
-        self as u8
-    }
+pub enum IrqMask {
+    TxDone = 0x08,
+    RxDone = 0x40,
+    PayloadCrcError = 0x20,
 }
 
 impl PaConfig {
@@ -64,7 +59,7 @@ impl PaConfig {
     }
 }
 
-impl IRQ {
+impl IrqMask {
     pub fn addr(self) -> u8 {
         self as u8
     }
@@ -97,3 +92,26 @@ pub enum FskRampUpRamDown {
     _12us = 0b1110,
     _10us = 0b1111
 }
+
+
+/*impl core::ops::BitOr<RadioMode> for u8
+{
+    type Output = Self;
+
+    // rhs is the "right-hand side" of the expression `a | b`
+    fn bitor(self, rhs: RadioMode) -> u8
+    {
+        self as u8 | rhs
+    }
+}
+
+impl core::ops::BitOr<RadioMode> for RadioMode
+{
+    type Output = Self;
+
+    // rhs is the "right-hand side" of the expression `a | b`
+    fn bitor(self, rhs: RadioMode) -> u8
+    {
+        self as u8 | rhs as u8
+    }
+}*/

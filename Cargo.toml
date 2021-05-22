@@ -14,6 +14,7 @@ description = "A platform-agnostic driver for Semtech SX1276/77/78/79 based boar
 embedded-hal = "~0.2"
 bit_field = "~0.10"
 heapless = "0.7.0"
+bitflags = "1.2.1"
 
 [features]
 version_0x09 = []
